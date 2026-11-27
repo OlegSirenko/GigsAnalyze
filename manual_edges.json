@@ -4,5 +4,59 @@
         "target": "D.I.C.E",
         "date": "28.11.2026",
         "link": "https://t.me/GigsArchive/1434"
+    }, 
+    {
+        "source": "Brown hoof",
+        "target": "Mashin' gun",
+        "date": "23.07.2026",
+        "link": "https://t.me/GigsArchive/1218"
+    },
+    {
+        "source": "Mashin' gun",
+        "target": "Garden Cats",
+        "date": "23.07.2026",
+        "link": "https://t.me/GigsArchive/1218"
+    },
+    {
+        "source": "DREAMLESS",
+        "target": "Unseen",
+        "date": "25.07.2026",
+        "link": "https://t.me/GigsArchive/1219"
+    },
+    {
+        "source": "DREAMLESS",
+        "target": "RECREMATE",
+        "date": "25.07.2026",
+        "link": "https://t.me/GigsArchive/1219"
+    },
+    {
+        "source":"Los Scolopendras",
+        "target":"INNUENDO",
+        "date":"17.04.2026",
+        "link":"https://t.me/GigsArchive/1079"
+    },
+    {
+        "source":"INNUENDO",
+        "target":"GDEGREMIT",
+        "date":"17.04.2026",
+        "link":"https://t.me/GigsArchive/1079"
+    },
+    {
+        "source":"GDEGREMIT",
+        "target":"СИНДИКАТ СЕЛЯВИ",
+        "date":"17.04.2026",
+        "link":"https://t.me/GigsArchive/1079"
+    },
+    {
+        "source":"ПРОЩАЙ ПРИВЫЧКА",
+        "target":"Valachobniki",
+        "date":"18.04.2026",
+        "link":"https://t.me/GigsArchive/1087"
+    },
+    {
+        "source":"АСФИКСИЯ",
+        "target":"Кофе из Виталюра",
+        "date":"11.09.2026",
+        "link":"https://t.me/GigsArchive/1087"
     }
 ]
