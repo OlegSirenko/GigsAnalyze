@@ -17,7 +17,10 @@ DB_PATH = 'posters_web.db'
 BANDS_JSON = 'bands.json'
 MANUAL_EDGES_JSON = 'manual_edges.json'
 EXCLUSIONS_JSON = 'exclusions.json'
-OUTPUT_HTML = 'index.html'
+OUTPUT_HTML = 'index.html'            # для GitHub Pages
+
+DEFAULT_USERNAME = 'GigsArchive'      # публичный username канала-архива
+CHANNEL_USERNAMES = {}                # если каналов несколько: {'1234567890': 'GigsArchive'}
 
 # ==========================================
 # 2. Загрузка данных
@@ -30,7 +33,13 @@ manual_edges = []
 if os.path.exists(MANUAL_EDGES_JSON):
     with open(MANUAL_EDGES_JSON, 'r', encoding='utf-8') as f:
         manual_edges = json.load(f)
+    # страховка от пробелов в ключах и значениях ("source ", "D.I.C.E " и т.п.)
+    manual_edges = [
+        {k.strip(): (v.strip() if isinstance(v, str) else v) for k, v in e.items()}
+        for e in manual_edges
+    ]
     print(f"Загружено ручных связей: {len(manual_edges)}")
+
 
 def parse_exclusion(entry):
     """Понимает: https://t.me/GigsArchive/1221, https://t.me/c/123456/1221,
@@ -45,6 +54,7 @@ def parse_exclusion(entry):
     if entry.isdigit():
         return None, entry
     return None, None
+
 
 exclusions = {}  # группа -> {(канал или None, msg_id)}
 if os.path.exists(EXCLUSIONS_JSON):
@@ -61,20 +71,12 @@ if os.path.exists(EXCLUSIONS_JSON):
 total_exclusions = sum(len(v) for v in exclusions.values())
 print(f"Загружено исключений: {total_exclusions}")
 
+
 def strip_html(text):
-    if not text: return ""
+    if not text:
+        return ""
     return html_mod.unescape(re.sub(r'<[^>]+>', ' ', text))
 
-# ==========================================
-# 3. Сбор связей и упоминаний из БД
-# ==========================================
-print("Анализирую базу данных...")
-band_mentions = Counter()
-edge_metadata = defaultdict(list)
-node_metadata = defaultdict(list)
-
-CHANNEL_USERNAMES = {}  # необязательно: {'1234567890': 'GigsArchive'}
-exclusion_hits = 0
 
 def is_excluded(band, chat_str, msg_str):
     for ch, mid in exclusions.get(band, ()):
@@ -86,66 +88,74 @@ def is_excluded(band, chat_str, msg_str):
             return True  # канал задан username'ом, карты нет — сверяем по ID поста
     return False
 
+
+# ==========================================
+# 3. Сбор связей и упоминаний из БД
+# ==========================================
+print("Анализирую базу данных...")
+band_mentions = Counter()
+edge_metadata = defaultdict(list)
+node_metadata = defaultdict(list)
+exclusion_hits = 0
+
 with sqlite3.connect(DB_PATH) as conn:
     cursor = conn.cursor()
     query = """
-        SELECT id, caption, event_date, channel_chat_id, channel_message_id 
-        FROM web_posters 
+        SELECT id, caption, event_date, channel_chat_id, channel_message_id
+        FROM web_posters
         WHERE COALESCE(is_cancelled, 0) = 0
     """
     rows = cursor.execute(query).fetchall()
-    
+
     for row in rows:
         post_id, caption, event_date, chat_id, msg_id = row
-        if not caption: continue
-        
+        if not caption:
+            continue
+
         clean_post = strip_html(caption)
         found_bands = []
-        
+
         date_str = "Дата не указана"
         if event_date:
             try:
                 dt = datetime.strptime(str(event_date)[:10], '%Y-%m-%d')
                 date_str = dt.strftime('%d.%m.%Y')
-            except:
+            except ValueError:
                 pass
-                
-        # Формируем все возможные форматы ссылок для проверки исключений
+
+        # Публичная ссылка вида https://t.me/GigsArchive/1380
         link = ""
         short_link = ""
-        chat_str = "GigsArchive"   # ← добавить
+        chat_str = ""
         msg_str = str(msg_id) if msg_id else ""
-        
+
         if chat_id and msg_id:
             chat_str = str(chat_id)
             if chat_str.startswith('-100'):
                 chat_str = chat_str[4:]
             elif chat_str.startswith('-'):
                 chat_str = chat_str[1:]
-            username = "GigsArchive"
-            if username:
-                link = f"https://t.me/{username}/{msg_id}"      # публичная: t.me/GigsArchive/1380
-            else:
-                link = f"https://t.me/c/{chat_str}/{msg_id}"    # запасной вариант
-                short_link = f"{chat_str}/{msg_id}"
-            
+            short_link = f"{chat_str}/{msg_id}"
+            username = CHANNEL_USERNAMES.get(chat_str) or DEFAULT_USERNAME
+            link = f"https://t.me/{username}/{msg_id}"
+
         for canonical, aliases in bands_dict.items():
-            # ПРОВЕРКА ИСКЛЮЧЕНИЙ (ищем ID поста, полную ссылку, короткую или msg_id)
+            # Исключение: группа не учитывается в этом посте вообще
             if msg_str and is_excluded(canonical, chat_str, msg_str):
                 exclusion_hits += 1
                 continue
-                    
+
             search_terms = [canonical] + aliases
             for term in search_terms:
-                if not term: continue
+                if not term:
+                    continue
                 if re.search(r'(?<![\w])' + re.escape(term) + r'(?![\w])', clean_post, re.IGNORECASE):
                     found_bands.append(canonical)
                     band_mentions[canonical] += 1
                     node_metadata[canonical].append({'date': date_str, 'link': link})
                     break
-                    
+
         unique_bands = list(set(found_bands))
-        
         if len(unique_bands) >= 2:
             for b1, b2 in itertools.combinations(sorted(unique_bands), 2):
                 edge_metadata[(b1, b2)].append({'date': date_str, 'link': link})
@@ -158,11 +168,19 @@ for edge in manual_edges:
     date_str = edge.get('date', 'Вручную')
     link = edge.get('link', '')
     note = edge.get('note', '')
-    
+
+    # исключения действуют и на ручные связи
+    ch, mid = parse_exclusion(link)
+    if mid and (is_excluded(b1, ch or '', mid) or is_excluded(b2, ch or '', mid)):
+        exclusion_hits += 1
+        continue
+
     edge_metadata[(b1, b2)].append({'date': date_str, 'link': link, 'note': note})
-    if b1 not in band_mentions: band_mentions[b1] = 0
-    if b2 not in band_mentions: band_mentions[b2] = 0
-    
+    if b1 not in band_mentions:
+        band_mentions[b1] = 0
+    if b2 not in band_mentions:
+        band_mentions[b2] = 0
+
     node_metadata[b1].append({'date': date_str, 'link': link, 'note': f"Вручную с {b2}"})
     node_metadata[b2].append({'date': date_str, 'link': link, 'note': f"Вручную с {b1}"})
 
@@ -186,7 +204,7 @@ else:
 # ==========================================
 # 6. Настройка PyVis
 # ==========================================
-net = Network(height='900px', width='100%', bgcolor='#121212', font_color='white', directed=False)
+net = Network(height='100vh', width='100%', bgcolor='#121212', font_color='white', directed=False)
 net.barnes_hut(gravity=-12000, central_gravity=0.3, spring_length=300, spring_strength=0.04, damping=0.09)
 
 net.set_options("""
@@ -201,7 +219,7 @@ var options = {
 }
 """)
 
-colors = ['#FF595E', '#FFCA3A', '#8AC926', '#1982C4', '#6A4C93', 
+colors = ['#FF595E', '#FFCA3A', '#8AC926', '#1982C4', '#6A4C93',
           '#FF924C', '#45B7D1', '#96CEB4', '#FFEEAD', '#D65DB1',
           '#FF6B6B', '#4ECDC4', '#FFA07A', '#98D8C8',
           '#F06292', '#AED581', '#FFD54F', '#4DB6AC', '#7986CB']
@@ -213,14 +231,14 @@ added_nodes = set()
 for band, count in band_mentions.items():
     size = min(10 + (max(count, 1) * 4), 60)
     comm_id = band_to_community.get(band, -1)
-    
+
     if comm_id != -1:
         color = colors[comm_id % len(colors)]
         title = f"{band}\nУпоминаний: {count}\nКлан: #{comm_id + 1}"
     else:
         color = '#888888'
         title = f"{band}\nУпоминаний: {count}\nОдиночка"
-    
+
     net.add_node(band, label=band, value=size, color=color, title=title, font={'size': 14})
     added_nodes.add(band)
 
@@ -233,15 +251,15 @@ for (b1, b2), occurrences in edge_metadata.items():
         weight = len(occurrences)
         edge_width = 1 + (weight * 1.5)
         opacity = min(0.2 + (weight * 0.15), 0.9)
-        
-        def sort_key(x): 
+
+        def sort_key(x):
             return datetime.strptime(x['date'], '%d.%m.%Y') if x['date'] not in ('Вручную', 'Дата не указана') else datetime.min
         sorted_occ = sorted(occurrences, key=sort_key)
-        
+
         dates_list = [occ['date'] for occ in sorted_occ]
         tooltip = f"{b1} + {b2}\n\n" + "\n".join(dates_list)
-        
-        net.add_edge(b1, b2, value=weight, title=tooltip, 
+
+        net.add_edge(b1, b2, value=weight, title=tooltip,
                      color={'color': '#ffffff', 'opacity': opacity}, width=edge_width)
         edges_added += 1
 
@@ -255,11 +273,19 @@ with open(temp_file, 'r', encoding='utf-8') as f:
     html_content = f.read()
 os.remove(temp_file)
 
-js_node_data = json.dumps({k: v for k, v in node_metadata.items()}, ensure_ascii=False)
+# viewport для мобильных (pyvis его не добавляет)
+html_content = html_content.replace(
+    '</head>',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">\n</head>'
+)
+
+js_node_data = json.dumps(dict(node_metadata), ensure_ascii=False)
 js_edge_data = json.dumps({f"{b1}|{b2}": v for (b1, b2), v in edge_metadata.items()}, ensure_ascii=False)
 
 custom_js = f"""
 <style>
+    body {{ margin: 0; overflow: hidden; }}
+
     #left-panel {{
         position: fixed; top: 10px; left: 10px; width: 280px; max-height: 90vh;
         overflow-y: auto; background: rgba(30, 30, 36, 0.95); color: white;
@@ -272,19 +298,13 @@ custom_js = f"""
         border: 1px solid #555; background: #1e1e24; color: white; box-sizing: border-box;
         font-size: 14px;
     }}
-    #band-list {{
-        list-style: none; padding: 0; margin: 0;
-    }}
+    #band-list {{ list-style: none; padding: 0; margin: 0; }}
     #band-list li {{
         padding: 10px; cursor: pointer; border-bottom: 1px solid #333;
         font-size: 14px; transition: background 0.2s; display: flex; justify-content: space-between;
     }}
-    #band-list li:hover {{
-        background: #444;
-    }}
-    .band-count {{
-        color: #888; font-size: 12px;
-    }}
+    #band-list li:hover {{ background: #444; }}
+    .band-count {{ color: #888; font-size: 12px; }}
 
     #info-panel {{
         position: fixed; top: 10px; right: 10px; width: 350px; max-height: 90vh;
@@ -301,7 +321,33 @@ custom_js = f"""
     #close-panel {{ float: right; cursor: pointer; color: #aaa; font-size: 20px; margin-top: -5px; }}
     #close-panel:hover {{ color: white; }}
     .subtitle {{ font-size: 12px; color: #aaa; margin-bottom: 15px; display: block; }}
+
+    #panel-toggle {{
+        display: none; position: fixed; top: 10px; left: 10px; z-index: 1001;
+        background: rgba(30, 30, 36, 0.95); color: white; border: 1px solid #444;
+        border-radius: 8px; padding: 10px 14px; font-size: 15px; cursor: pointer;
+        font-family: 'Segoe UI', sans-serif;
+    }}
+
+    @media (max-width: 768px) {{
+        #panel-toggle {{ display: block; }}
+        #left-panel {{
+            display: none;
+            top: 56px; left: 10px; right: 10px; width: auto;
+            max-height: 45vh;
+        }}
+        #left-panel.open {{ display: block; }}
+        #info-panel {{
+            top: auto; bottom: 10px; left: 10px; right: 10px; width: auto;
+            max-height: 50vh;
+        }}
+        #search-input {{ font-size: 16px; }}
+        #band-list li {{ padding: 12px 10px; font-size: 15px; }}
+        #close-panel {{ font-size: 26px; padding: 0 6px; }}
+    }}
 </style>
+
+<button id="panel-toggle" onclick="document.getElementById('left-panel').classList.toggle('open')">☰ Группы</button>
 
 <div id="left-panel">
     <input type="text" id="search-input" placeholder="🔍 Поиск группы...">
@@ -333,6 +379,7 @@ custom_js = f"""
     }}
 
     function showNodeInfo(nodeId) {{
+        if (window.innerWidth <= 768) document.getElementById('left-panel').classList.remove('open');
         var items = nodeData[nodeId] || [];
         document.getElementById('panel-title').innerText = "🎸 " + nodeId;
         document.getElementById('panel-subtitle').innerText = "Всего постов: " + items.length;
@@ -341,12 +388,13 @@ custom_js = f"""
     }}
 
     function showEdgeInfo(edgeId) {{
+        if (window.innerWidth <= 768) document.getElementById('left-panel').classList.remove('open');
         var edge = edges.get(edgeId);
         var key1 = edge.from + "|" + edge.to;
         var key2 = edge.to + "|" + edge.from;
         var items = edgeData[key1] || edgeData[key2] || [];
-        
-        document.getElementById('panel-title').innerText = edge.from + " + " + edge.to;
+
+        document.getElementById('panel-title').innerText = "🤝 " + edge.from + " + " + edge.to;
         document.getElementById('panel-subtitle').innerText = "Играли вместе: " + items.length + " раз(а)";
         document.getElementById('panel-content').innerHTML = renderList(items);
         document.getElementById('info-panel').style.display = 'block';
@@ -356,7 +404,7 @@ custom_js = f"""
     function renderBandList(filterText = "") {{
         listContainer.innerHTML = "";
         const filtered = allBands.filter(b => b.toLowerCase().includes(filterText.toLowerCase()));
-        
+
         if (filtered.length === 0) {{
             listContainer.innerHTML = "<li style='color: #888;'>Ничего не найдено</li>";
             return;
@@ -379,7 +427,7 @@ custom_js = f"""
     document.getElementById('search-input').addEventListener('input', function(e) {{
         renderBandList(e.target.value);
     }});
-    
+
     setTimeout(function() {{
         if (typeof network !== 'undefined') {{
             renderBandList();
@@ -407,4 +455,5 @@ with open(OUTPUT_HTML, 'w', encoding='utf-8') as f:
 print(f"\n✅ Граф успешно создан!")
 print(f"📊 Групп (узлов): {len(added_nodes)}")
 print(f"🔗 Связей (линий): {edges_added}")
+print(f"🚫 Применено исключений: {exclusion_hits}")
 print(f"📁 Откройте файл '{OUTPUT_HTML}' в вашем браузере.")

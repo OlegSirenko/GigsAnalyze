@@ -33,7 +33,7 @@
 
              #mynetwork {
                  width: 100%;
-                 height: 900px;
+                 height: 100vh;
                  background-color: #121212;
                  border: 1px solid lightgray;
                  position: relative;
@@ -46,7 +46,7 @@
                  top:0px;
                  left:0px;
                  width: 100%;
-                 height: 900px;
+                 height: 100vh;
                  background-color:rgba(200,200,200,0.8);
                  -webkit-transition: all 0.5s ease;
                  -moz-transition: all 0.5s ease;
@@ -115,7 +115,8 @@
 
              
         </style>
-    </head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
 
 
     <body>
@@ -220,6 +221,8 @@
         </script>
     
 <style>
+    body { margin: 0; overflow: hidden; }
+
     #left-panel {
         position: fixed; top: 10px; left: 10px; width: 280px; max-height: 90vh;
         overflow-y: auto; background: rgba(30, 30, 36, 0.95); color: white;
@@ -232,19 +235,13 @@
         border: 1px solid #555; background: #1e1e24; color: white; box-sizing: border-box;
         font-size: 14px;
     }
-    #band-list {
-        list-style: none; padding: 0; margin: 0;
-    }
+    #band-list { list-style: none; padding: 0; margin: 0; }
     #band-list li {
         padding: 10px; cursor: pointer; border-bottom: 1px solid #333;
         font-size: 14px; transition: background 0.2s; display: flex; justify-content: space-between;
     }
-    #band-list li:hover {
-        background: #444;
-    }
-    .band-count {
-        color: #888; font-size: 12px;
-    }
+    #band-list li:hover { background: #444; }
+    .band-count { color: #888; font-size: 12px; }
 
     #info-panel {
         position: fixed; top: 10px; right: 10px; width: 350px; max-height: 90vh;
@@ -261,7 +258,33 @@
     #close-panel { float: right; cursor: pointer; color: #aaa; font-size: 20px; margin-top: -5px; }
     #close-panel:hover { color: white; }
     .subtitle { font-size: 12px; color: #aaa; margin-bottom: 15px; display: block; }
+
+    #panel-toggle {
+        display: none; position: fixed; top: 10px; left: 10px; z-index: 1001;
+        background: rgba(30, 30, 36, 0.95); color: white; border: 1px solid #444;
+        border-radius: 8px; padding: 10px 14px; font-size: 15px; cursor: pointer;
+        font-family: 'Segoe UI', sans-serif;
+    }
+
+    @media (max-width: 768px) {
+        #panel-toggle { display: block; }
+        #left-panel {
+            display: none;
+            top: 56px; left: 10px; right: 10px; width: auto;
+            max-height: 45vh;
+        }
+        #left-panel.open { display: block; }
+        #info-panel {
+            top: auto; bottom: 10px; left: 10px; right: 10px; width: auto;
+            max-height: 50vh;
+        }
+        #search-input { font-size: 16px; }
+        #band-list li { padding: 12px 10px; font-size: 15px; }
+        #close-panel { font-size: 26px; padding: 0 6px; }
+    }
 </style>
+
+<button id="panel-toggle" onclick="document.getElementById('left-panel').classList.toggle('open')">☰ Группы</button>
 
 <div id="left-panel">
     <input type="text" id="search-input" placeholder="🔍 Поиск группы...">
@@ -293,6 +316,7 @@
     }
 
     function showNodeInfo(nodeId) {
+        if (window.innerWidth <= 768) document.getElementById('left-panel').classList.remove('open');
         var items = nodeData[nodeId] || [];
         document.getElementById('panel-title').innerText = "🎸 " + nodeId;
         document.getElementById('panel-subtitle').innerText = "Всего постов: " + items.length;
@@ -301,12 +325,13 @@
     }
 
     function showEdgeInfo(edgeId) {
+        if (window.innerWidth <= 768) document.getElementById('left-panel').classList.remove('open');
         var edge = edges.get(edgeId);
         var key1 = edge.from + "|" + edge.to;
         var key2 = edge.to + "|" + edge.from;
         var items = edgeData[key1] || edgeData[key2] || [];
-        
-        document.getElementById('panel-title').innerText = edge.from + " + " + edge.to;
+
+        document.getElementById('panel-title').innerText = "🤝 " + edge.from + " + " + edge.to;
         document.getElementById('panel-subtitle').innerText = "Играли вместе: " + items.length + " раз(а)";
         document.getElementById('panel-content').innerHTML = renderList(items);
         document.getElementById('info-panel').style.display = 'block';
@@ -316,7 +341,7 @@
     function renderBandList(filterText = "") {
         listContainer.innerHTML = "";
         const filtered = allBands.filter(b => b.toLowerCase().includes(filterText.toLowerCase()));
-        
+
         if (filtered.length === 0) {
             listContainer.innerHTML = "<li style='color: #888;'>Ничего не найдено</li>";
             return;
@@ -339,7 +364,7 @@
     document.getElementById('search-input').addEventListener('input', function(e) {
         renderBandList(e.target.value);
     });
-    
+
     setTimeout(function() {
         if (typeof network !== 'undefined') {
             renderBandList();
