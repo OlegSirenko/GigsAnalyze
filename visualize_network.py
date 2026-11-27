@@ -17,7 +17,7 @@ DB_PATH = 'posters_web.db'
 BANDS_JSON = 'bands.json'
 MANUAL_EDGES_JSON = 'manual_edges.json'
 EXCLUSIONS_JSON = 'exclusions.json'
-OUTPUT_HTML = 'underground_network_full.html'
+OUTPUT_HTML = 'index.html'
 
 # ==========================================
 # 2. Загрузка данных
