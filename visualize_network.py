@@ -17,7 +17,7 @@ DB_PATH = 'posters_web.db'
 BANDS_JSON = 'bands.json'
 MANUAL_EDGES_JSON = 'manual_edges.json'
 EXCLUSIONS_JSON = 'exclusions.json'
-OUTPUT_HTML = 'index.html'            # для GitHub Pages
+OUTPUT_HTML = os.environ.get('ANALYZE_OUTPUT_HTML', 'index.html')  # GitHub Pages / сайт
 
 DEFAULT_USERNAME = 'GigsArchive'      # публичный username канала-архива
 CHANNEL_USERNAMES = {}                # если каналов несколько: {'1234567890': 'GigsArchive'}
@@ -181,8 +181,14 @@ for edge in manual_edges:
     if b2 not in band_mentions:
         band_mentions[b2] = 0
 
-    node_metadata[b1].append({'date': date_str, 'link': link, 'note': f"Вручную с {b2}"})
-    node_metadata[b2].append({'date': date_str, 'link': link, 'note': f"Вручную с {b1}"})
+        # не дублируем событие, если этот же пост уже дал упоминание группы
+    def already_has(band):
+        return any(m.get('link') == link for m in node_metadata.get(band, ()))
+
+    if not already_has(b1):
+        node_metadata[b1].append({'date': date_str, 'link': link, 'note': f"Вручную с {b2}"})
+    if not already_has(b2):
+        node_metadata[b2].append({'date': date_str, 'link': link, 'note': f"Вручную с {b1}"})
 
 # ==========================================
 # 5. Граф и кластеры (NetworkX)
@@ -204,7 +210,7 @@ else:
 # ==========================================
 # 6. Настройка PyVis
 # ==========================================
-net = Network(height='100vh', width='100%', bgcolor='#121212', font_color='white', directed=False)
+net = Network(height='100vh', width='100%', bgcolor='#0a0a0f', font_color='#f5efdc', directed=False)
 net.barnes_hut(gravity=-12000, central_gravity=0.3, spring_length=300, spring_strength=0.04, damping=0.09)
 
 net.set_options("""
@@ -219,10 +225,11 @@ var options = {
 }
 """)
 
-colors = ['#FF595E', '#FFCA3A', '#8AC926', '#1982C4', '#6A4C93',
-          '#FF924C', '#45B7D1', '#96CEB4', '#FFEEAD', '#D65DB1',
-          '#FF6B6B', '#4ECDC4', '#FFA07A', '#98D8C8',
-          '#F06292', '#AED581', '#FFD54F', '#4DB6AC', '#7986CB']
+# Палитра в стиле сайта Gigs Archive (gold / red / purple / green на тёмном)
+colors = ['#F4D03F', '#E74C3C', '#9B59B6', '#27AE60', '#F5EFDC',
+          '#E67E22', '#3498DB', '#1ABC9C', '#E84393', '#A855F7',
+          '#FF6B4A', '#FFCA3A', '#45B7D1', '#D65DB1', '#96CEB4',
+          '#FFD54F', '#4ECDC4', '#7986CB', '#AED581']
 
 # ==========================================
 # 7. Узлы
@@ -236,7 +243,7 @@ for band, count in band_mentions.items():
         color = colors[comm_id % len(colors)]
         title = f"{band}\nУпоминаний: {count}\nКлан: #{comm_id + 1}"
     else:
-        color = '#888888'
+        color = '#7c7869'
         title = f"{band}\nУпоминаний: {count}\nОдиночка"
 
     net.add_node(band, label=band, value=size, color=color, title=title, font={'size': 14})
@@ -260,7 +267,7 @@ for (b1, b2), occurrences in edge_metadata.items():
         tooltip = f"{b1} + {b2}\n\n" + "\n".join(dates_list)
 
         net.add_edge(b1, b2, value=weight, title=tooltip,
-                     color={'color': '#ffffff', 'opacity': opacity}, width=edge_width)
+                     color={'color': '#F4D03F', 'opacity': opacity}, width=edge_width)
         edges_added += 1
 
 # ==========================================
@@ -273,10 +280,14 @@ with open(temp_file, 'r', encoding='utf-8') as f:
     html_content = f.read()
 os.remove(temp_file)
 
-# viewport для мобильных (pyvis его не добавляет)
+# viewport для мобильных (pyvis его не добавляет) + фирменные шрифты сайта
 html_content = html_content.replace(
     '</head>',
-    '<meta name="viewport" content="width=device-width, initial-scale=1">\n</head>'
+    '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+    '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
+    '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Courier+Prime&family=Oswald:wght@700&family=Rubik+Mono+One&family=Special+Elite&display=swap">\n'
+    '</head>'
 )
 
 js_node_data = json.dumps(dict(node_metadata), ensure_ascii=False)
@@ -284,56 +295,116 @@ js_edge_data = json.dumps({f"{b1}|{b2}": v for (b1, b2), v in edge_metadata.item
 
 custom_js = f"""
 <style>
-    body {{ margin: 0; overflow: hidden; }}
+    /* ===== Стиль в палитре сайта Gigs Archive (ransom / grunge) ===== */
+    :root {{
+        --ink: #0A0A0F;
+        --gold: #F4D03F;
+        --red: #E74C3C;
+        --purple: #9B59B6;
+        --green: #27AE60;
+        --paper: #f5efdc;
+        --muted: #7c7869;
+        --border: rgba(244, 208, 63, .22);
+        --font-type: 'Special Elite', 'Courier Prime', 'PT Mono', 'Courier New', monospace;
+        --font-stencil: 'Rubik Mono One', 'Oswald', Impact, 'Arial Black', sans-serif;
+    }}
+    html, body {{ margin: 0; height: 100%; }}
+    body {{
+        overflow: hidden;
+        font-family: var(--font-type);
+        color: var(--paper);
+        background:
+            radial-gradient(ellipse at 20% 0%, rgba(155, 89, 182, .10), transparent 45%),
+            radial-gradient(ellipse at 85% 100%, rgba(231, 76, 60, .08), transparent 45%),
+            var(--ink);
+    }}
+    #mynetwork, #mynetwork canvas, .vis-network {{ background: var(--ink) !important; background-color: var(--ink) !important; }}
+    div.vis-network div.vis-manipulation, .vis-tooltip {{
+        background: var(--ink) !important; color: var(--paper) !important;
+        border: 2px solid var(--border) !important;
+    }}
+
+    /* --- Верхняя панель в стиле сайта --- */
+    #topbar {{
+        position: fixed; top: 0; left: 0; right: 0; height: 56px; z-index: 1100;
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0 16px; box-sizing: border-box;
+        background: rgba(10, 10, 15, .92); backdrop-filter: blur(4px);
+        border-bottom: 3px double var(--gold);
+    }}
+    #topbar .tb-brand {{
+        font-family: var(--font-stencil); font-size: 1rem; letter-spacing: .06em;
+        color: var(--gold); text-decoration: none; text-shadow: 2px 2px 0 rgba(0,0,0,.6);
+    }}
+    #topbar nav {{ display: flex; gap: 18px; }}
+    #topbar nav a {{
+        color: var(--paper); text-decoration: none; font-size: .95rem; font-weight: 700;
+        padding: 4px 8px; border: 2px solid transparent; transition: all .15s ease;
+    }}
+    #topbar nav a:hover {{ color: var(--ink); background: var(--gold); transform: rotate(-1deg); }}
+    #topbar nav a.active {{ color: var(--gold); border-color: var(--gold); }}
 
     #left-panel {{
-        position: fixed; top: 10px; left: 10px; width: 280px; max-height: 90vh;
-        overflow-y: auto; background: rgba(30, 30, 36, 0.95); color: white;
-        padding: 15px; border-radius: 12px; border: 1px solid #444;
-        z-index: 1000; font-family: 'Segoe UI', sans-serif;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        position: fixed; top: 68px; left: 10px; width: 280px; max-height: 80vh;
+        overflow-y: auto; background: rgba(20, 20, 29, .96); color: var(--paper);
+        padding: 15px; border: 2px solid var(--border); border-radius: 2px;
+        z-index: 1000; font-family: var(--font-type);
+        box-shadow: 5px 6px 0 rgba(0, 0, 0, .55);
+    }}
+    #left-panel h2 {{
+        margin: 0 0 12px; font-family: var(--font-stencil); font-size: 1rem;
+        color: var(--gold); letter-spacing: .05em; text-transform: uppercase;
     }}
     #search-input {{
-        width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 6px;
-        border: 1px solid #555; background: #1e1e24; color: white; box-sizing: border-box;
-        font-size: 14px;
+        width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 2px;
+        border: 2px solid var(--border); background: var(--ink); color: var(--paper);
+        box-sizing: border-box; font-size: 14px; font-family: var(--font-type);
     }}
+    #search-input::placeholder {{ color: var(--muted); }}
+    #search-input:focus {{ outline: none; border-color: var(--gold); }}
     #band-list {{ list-style: none; padding: 0; margin: 0; }}
     #band-list li {{
-        padding: 10px; cursor: pointer; border-bottom: 1px solid #333;
-        font-size: 14px; transition: background 0.2s; display: flex; justify-content: space-between;
+        padding: 10px; cursor: pointer; border-bottom: 1px dashed rgba(244, 208, 63, .15);
+        font-size: 14px; transition: background .15s, color .15s;
+        display: flex; justify-content: space-between; gap: 8px;
     }}
-    #band-list li:hover {{ background: #444; }}
-    .band-count {{ color: #888; font-size: 12px; }}
+    #band-list li:hover {{ background: var(--gold); color: var(--ink); }}
+    .band-count {{ color: var(--muted); font-size: 12px; }}
+    #band-list li:hover .band-count {{ color: var(--ink); }}
 
     #info-panel {{
-        position: fixed; top: 10px; right: 10px; width: 350px; max-height: 90vh;
-        overflow-y: auto; background: rgba(30, 30, 36, 0.95); color: white;
-        padding: 20px; border-radius: 12px; border: 1px solid #444;
-        display: none; z-index: 1000; font-family: 'Segoe UI', sans-serif;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        position: fixed; top: 68px; right: 10px; width: 350px; max-height: 80vh;
+        overflow-y: auto; background: rgba(20, 20, 29, .96); color: var(--paper);
+        padding: 20px; border: 2px solid var(--border); border-radius: 2px;
+        display: none; z-index: 1000; font-family: var(--font-type);
+        box-shadow: 5px 6px 0 rgba(0, 0, 0, .55);
     }}
-    #info-panel h3 {{ margin-top: 0; color: #ff6b6b; border-bottom: 1px solid #444; padding-bottom: 10px; }}
+    #info-panel h3 {{
+        margin-top: 0; color: var(--gold); font-family: var(--font-stencil);
+        border-bottom: 2px dashed var(--border); padding-bottom: 10px;
+    }}
     #info-panel ul {{ padding-left: 20px; margin: 0; }}
     #info-panel li {{ margin-bottom: 8px; line-height: 1.4; }}
-    #info-panel a {{ color: #4ECDC4; text-decoration: none; font-weight: bold; margin-left: 5px; }}
-    #info-panel a:hover {{ text-decoration: underline; }}
-    #close-panel {{ float: right; cursor: pointer; color: #aaa; font-size: 20px; margin-top: -5px; }}
-    #close-panel:hover {{ color: white; }}
-    .subtitle {{ font-size: 12px; color: #aaa; margin-bottom: 15px; display: block; }}
+    #info-panel a {{ color: var(--purple); text-decoration: none; font-weight: bold; margin-left: 5px; }}
+    #info-panel a:hover {{ color: var(--red); text-decoration: underline; }}
+    #close-panel {{ float: right; cursor: pointer; color: var(--muted); font-size: 20px; margin-top: -5px; }}
+    #close-panel:hover {{ color: var(--gold); }}
+    .subtitle {{ font-size: 12px; color: var(--muted); margin-bottom: 15px; display: block; }}
 
     #panel-toggle {{
-        display: none; position: fixed; top: 10px; left: 10px; z-index: 1001;
-        background: rgba(30, 30, 36, 0.95); color: white; border: 1px solid #444;
-        border-radius: 8px; padding: 10px 14px; font-size: 15px; cursor: pointer;
-        font-family: 'Segoe UI', sans-serif;
+        display: none; position: fixed; top: 68px; left: 10px; z-index: 1001;
+        background: var(--gold); color: var(--ink); border: 2px solid var(--ink);
+        border-radius: 2px; padding: 10px 14px; font-size: 15px; cursor: pointer;
+        font-family: var(--font-stencil); box-shadow: 3px 3px 0 rgba(0, 0, 0, .6);
     }}
 
     @media (max-width: 768px) {{
+        #topbar nav {{ gap: 8px; }}
+        #topbar nav a {{ font-size: .78rem; padding: 3px 5px; }}
         #panel-toggle {{ display: block; }}
         #left-panel {{
             display: none;
-            top: 56px; left: 10px; right: 10px; width: auto;
+            top: 118px; left: 10px; right: 10px; width: auto;
             max-height: 45vh;
         }}
         #left-panel.open {{ display: block; }}
@@ -347,9 +418,21 @@ custom_js = f"""
     }}
 </style>
 
+<div id="topbar">
+    <a class="tb-brand" href="/">GIGS ARCHIVE</a>
+    <nav>
+        <a href="/">Главная</a>
+        <a href="/posters">Афиши</a>
+        <a href="/articles">Статьи</a>
+        <a href="/network" class="active">Граф</a>
+        <a href="https://t.me/{DEFAULT_USERNAME}" target="_blank">Telegram</a>
+    </nav>
+</div>
+
 <button id="panel-toggle" onclick="document.getElementById('left-panel').classList.toggle('open')">☰ Группы</button>
 
 <div id="left-panel">
+    <h2>Группы</h2>
     <input type="text" id="search-input" placeholder="🔍 Поиск группы...">
     <ul id="band-list"></ul>
 </div>
